@@ -20,6 +20,17 @@
 #define FIO_HAVE_GETTID
 #define FIO_HAVE_CHARDEV_SIZE
 #define FIO_HAVE_NATIVE_FALLOCATE
+#define FIO_HAVE_TRIM
+
+/*
+ * macOS doesn't support sync_file_range() for files, but since we only want
+ * this option for raw disk devices, we implement this to DKIOCSYNCHRONIZE.
+ */
+
+#define	CONFIG_SYNC_FILE_RANGE
+#define	SYNC_FILE_RANGE_WAIT_BEFORE	0x1
+#define	SYNC_FILE_RANGE_WRITE		0x2
+#define	SYNC_FILE_RANGE_WAIT_AFTER	0x4
 
 #define OS_MAP_ANON		MAP_ANON
 
@@ -104,6 +115,41 @@ static inline bool fio_fallocate(struct fio_file *f, uint64_t offset, uint64_t l
 	}
 
 	return false;
+}
+
+static inline int os_trim(struct fio_file *f, unsigned long long start,
+			  unsigned long long len)
+{
+	dk_extent_t x;
+	dk_unmap_t u;
+
+	x.offset = start;
+	x.length = len;
+
+	u.extents = &x;
+	u.extentsCount = 1;
+	u.options = 0;
+
+	if (!ioctl(f->fd, DKIOCUNMAP, &u))
+		return 0;
+
+	return errno;
+}
+
+static inline int sync_file_range(int fd, uint64_t offset, uint64_t nbytes,
+		    unsigned int flags)
+{
+	dk_synchronize_t s;
+
+	bzero(&s, sizeof (s));
+	s.offset = offset;
+	s.length = nbytes;
+	s.options = 0;
+
+	if (!ioctl(fd, DKIOCSYNCHRONIZE, &s))
+		return (0);
+
+	return errno;
 }
 
 #endif
